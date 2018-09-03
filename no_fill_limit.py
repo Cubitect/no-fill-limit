@@ -9,28 +9,21 @@ if sys.version[0] == "3":
 
 def getfillclass(jarfile):
     zf = zipfile.ZipFile(jarfile, 'r')
-    fillclass = None
+    modclasses = []
     try:
         lst = zf.infolist()
         for zi in lst:
             fn = zi.filename
             if fn.endswith('.class'):
                 bytecode = zf.read(fn)
-                # find: "commands.fill.success"
-                p = bytecode.find(b'\x00\x15\x63\x6F\x6D\x6D\x61\x6E\x64\x73\x2E\x66\x69\x6C\x6C\x2E\x73\x75\x63\x63\x65\x73\x73')
-                if p < 0:
-                    continue
-                # find: "fill"
-                p = bytecode.find(b'\x00\x04\x66\x69\x6C\x6C')
-                if p < 0:
-                    continue
-                fillclass = fn
-                #print('Class CommandFill found: '+fillclass)
-                break
+                p1 = bytecode.find(b'\x00\x15commands.fill.success')
+                p2 = bytecode.find(b'\x00\x16commands.clone.success')
+                if any(p > 0 for p in [p1, p2]):
+                    modclasses += [fn]
     finally:
         zf.close()
-    
-    return fillclass
+    #print (modclasses)
+    return modclasses
 
 
 def isrelease(jsonfile):
@@ -47,7 +40,7 @@ def usesnewjson(jsonfile):
     return False
     
 
-def install(jarfile, jarnew, jsonfile, jsonnew, versionnew, fillclass):
+def install(jarfile, jarnew, jsonfile, jsonnew, versionnew, modclasses):
     
     with zipfile.ZipFile(jarfile, 'r') as zin:
         with zipfile.ZipFile(jarnew, 'w') as zout:
@@ -55,7 +48,7 @@ def install(jarfile, jarnew, jsonfile, jsonnew, versionnew, fillclass):
             for item in zin.infolist():
                 if jsonfile is not None and 'META-INF' in item.filename:
                     continue
-                if item.filename == fillclass:
+                if any(fn == item.filename for fn in modclasses):
                     # replace limit 32768 with max integer
                     bytecode = zin.read(item.filename)
                     bytecode = bytecode.replace(b'\x00\x00\x80\x00', b'\x7f\xff\xff\xff')
@@ -86,8 +79,6 @@ def install(jarfile, jarnew, jsonfile, jsonnew, versionnew, fillclass):
         with open(jsonnew,'w') as fout:
             with open(jsonfile,'r') as fin:
                 for line in fin:
-                    print(line)
-                    
                     if '"id":' in line:
                         line = '"id": "'+versionnew+'",'
                     if '"assets":' in line:
@@ -156,12 +147,14 @@ def main(jarfile, jsonfile, destdir, versnew):
             print('Error: File "'+jsonfile+'" does not exist.')
             return
     
-    fillclass = getfillclass(jarfile)
-    if fillclass is None:
+    modclasses = getfillclass(jarfile)
+    if modclasses == []:
         print('Error: There does not appear to be a CommandFill class in this version.')
         return
+    if len(modclasses) > 2:
+        print('Warning: The jar has too many classes that match the fill/clone commands.')
     
-    install(jarfile, jarnew, jsonfile, jsonnew, versnew, fillclass)
+    install(jarfile, jarnew, jsonfile, jsonnew, versnew, modclasses)
 
 
 if __name__ == '__main__':
